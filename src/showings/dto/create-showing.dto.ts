@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsISO8601, IsInt, IsPositive, IsUUID, Matches } from 'class-validator';
+import {
+  IsISO8601,
+  IsInt,
+  IsPositive,
+  IsUUID,
+  Matches,
+  Max,
+} from 'class-validator';
 import { IsFutureDateTime } from '../../common/validators/is-future-date-time.validator';
 
 export class CreateShowingDto {
@@ -44,5 +51,6 @@ export class CreateShowingDto {
   })
   @IsInt({ message: '$property має бути цілим числом (копійки)' })
   @IsPositive({ message: '$property має бути додатним числом' })
+  @Max(2147483647, { message: '$property має бути не більшим за 2147483647' })
   price!: number;
 }

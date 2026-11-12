@@ -1,5 +1,14 @@
+import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsInt, Max, Min, validateSync } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
 
 export enum NodeEnvironment {
   Development = 'development',
@@ -7,7 +16,6 @@ export enum NodeEnvironment {
   Test = 'test',
 }
 
-/** Environment variables of the app; defaults apply when a variable is not set. */
 export class EnvironmentVariables {
   @IsInt()
   @Min(1)
@@ -16,18 +24,38 @@ export class EnvironmentVariables {
 
   @IsEnum(NodeEnvironment)
   NODE_ENV: NodeEnvironment = NodeEnvironment.Development;
+
+  @IsString()
+  @IsNotEmpty()
+  DB_HOST!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  DB_PORT!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  DB_USERNAME!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  DB_PASSWORD!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  DB_DATABASE!: string;
 }
 
-export function validate(config: Record<string, unknown>) {
+export function validate(
+  config: Record<string, unknown>,
+): EnvironmentVariables {
   const validatedConfig = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });
-
-  const errors = validateSync(validatedConfig);
-
+  const errors = validateSync(validatedConfig, { whitelist: true });
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    throw new Error(`Invalid environment variables: ${errors.toString()}`);
   }
-
   return validatedConfig;
 }

@@ -1,5 +1,6 @@
-# Cinema API — запити для VS Code REST Client.
-# Запускайте зверху вниз по черзі на щойно запущеному сервері (npm run start:dev).
+# Cinema API — ДЗ №2, запити для VS Code REST Client.
+# Спочатку: docker compose up -d --wait; npm run migration:run; npm run start:dev.
+# Запускайте зверху вниз по черзі. Дані тепер зберігаються між перезапусками.
 # Ідентифікатори беруться зі змінних (відповіді іменованих запитів), вручну нічого не вводиться.
 # Біля кожного запиту вказано очікуваний статус: "Очікується: ...".
 
@@ -338,7 +339,7 @@ Content-Type: application/json
   "startsAt": "2030-01-15T21:00:00Z"
 }
 
-### Розклад: усі сеанси, за зростанням startsAt. Очікується: 200
+### Розклад: { items, total, page: 1, limit: 20 }, startsAt ASC та id ASC. Очікується: 200
 GET {{baseUrl}}/showings
 
 ### Розклад: лише фільм 1. Очікується: 200
@@ -347,8 +348,38 @@ GET {{baseUrl}}/showings?filmId={{filmId}}
 ### Розклад: лише 15.01.2030. Очікується: 200
 GET {{baseUrl}}/showings?date=2030-01-15
 
-### Розклад: фільм 2 І 15.01.2030 (AND, порожній масив). Очікується: 200
+### Розклад: фільм 2 І 15.01.2030 (AND, items: [], total: 0). Очікується: 200
 GET {{baseUrl}}/showings?filmId={{film2Id}}&date=2030-01-15
+
+### Пагінація: друга сторінка по одному сеансу фільму 1. Очікується: 200
+GET {{baseUrl}}/showings?filmId={{filmId}}&page=2&limit=1
+
+### Сортування за спаданням; фільтри і пагінація поєднуються. Очікується: 200
+GET {{baseUrl}}/showings?filmId={{filmId}}&date=2030-01-15&page=1&limit=2&sort=desc
+
+### Сторінка поза результатами: items: [], total не змінюється. Очікується: 200
+GET {{baseUrl}}/showings?filmId={{filmId}}&page=100&limit=100
+
+### Помилка: page не ціле число. Очікується: 400
+GET {{baseUrl}}/showings?page=1.5
+
+### Помилка: page не число. Очікується: 400
+GET {{baseUrl}}/showings?page=abc
+
+### Помилка: page менше 1. Очікується: 400
+GET {{baseUrl}}/showings?page=0
+
+### Помилка: limit не ціле число. Очікується: 400
+GET {{baseUrl}}/showings?limit=2.5
+
+### Помилка: limit менше 1. Очікується: 400
+GET {{baseUrl}}/showings?limit=0
+
+### Помилка: limit більше 100. Очікується: 400
+GET {{baseUrl}}/showings?limit=101
+
+### Помилка: sort не asc або desc. Очікується: 400
+GET {{baseUrl}}/showings?sort=invalid
 
 ### Помилка: date не у форматі YYYY-MM-DD. Очікується: 400
 GET {{baseUrl}}/showings?date=15-01-2030

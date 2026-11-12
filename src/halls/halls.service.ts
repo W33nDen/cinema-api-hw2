@@ -1,78 +1,65 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { ShowingsStore } from '../showings/showings.store';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreateHallDto } from './dto/create-hall.dto';
 import { Hall, HallWithSeats } from './entities/hall.entity';
 import { Seat } from './entities/seat.entity';
+import { HallEntity } from './entities/hall-record.entity';
+import { ShowingEntity } from '../showings/entities/showing-record.entity';
 
 @Injectable()
 export class HallsService {
-  private readonly logger = new Logger(HallsService.name);
-  private halls: Hall[] = [];
+  constructor(
+    @InjectRepository(HallEntity)
+    private readonly halls: Repository<HallEntity>,
+    @InjectRepository(ShowingEntity)
+    private readonly showings: Repository<ShowingEntity>,
+  ) {}
 
-  constructor(private readonly showingsStore: ShowingsStore) {}
-
-  create(createHallDto: CreateHallDto): Hall {
-    const name = createHallDto.name;
-    const taken = this.halls.some(
-      (hall) => hall.name.toLowerCase() === name.toLowerCase(),
-    );
-    if (taken) {
-      this.logger.warn(`Зал з назвою "${name}" вже існує`);
-      throw new ConflictException(`Зал з назвою "${name}" вже існує`);
+  async create(dto: CreateHallDto): Promise<Hall> {
+    try {
+      return await this.halls.save(this.halls.create(dto));
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException(`Зал з назвою "${dto.name}" вже існує`);
+      }
+      throw error;
     }
-    const hall: Hall = {
-      id: randomUUID(),
-      name,
-      rows: createHallDto.rows,
-      seatsPerRow: createHallDto.seatsPerRow,
-    };
-    this.halls.push(hall);
-    this.logger.log(`Створено зал ${hall.id}`);
+  }
+
+  findAll(): Promise<Hall[]> {
+    return this.halls.find({ order: { name: 'ASC', id: 'ASC' } });
+  }
+
+  findById(id: string): Promise<Hall | null> {
+    return this.halls.findOneBy({ id });
+  }
+
+  async findOne(id: string): Promise<Hall> {
+    const hall = await this.findById(id);
+    if (!hall) throw new NotFoundException(`Зал з id ${id} не знайдено`);
     return hall;
   }
 
-  findAll(): Hall[] {
-    return this.halls;
-  }
-
-  /** Returns the hall or undefined; for other modules that pick their own status code. */
-  findById(id: string): Hall | undefined {
-    return this.halls.find((hall) => hall.id === id);
-  }
-
-  findOne(id: string): Hall {
-    const hall = this.findById(id);
-    if (!hall) {
-      this.logger.warn(`Зал з id ${id} не знайдено`);
-      throw new NotFoundException(`Зал з id ${id} не знайдено`);
-    }
-    return hall;
-  }
-
-  findOneWithSeats(id: string): HallWithSeats {
-    const hall = this.findOne(id);
+  async findOneWithSeats(id: string): Promise<HallWithSeats> {
+    const hall = await this.findOne(id);
     return { ...hall, seats: this.getSeats(hall) };
   }
 
-  /** All seats of the hall: rows × seatsPerRow, ordered by row, then seat. */
-  getSeats(hall: Hall): Seat[] {
+  getSeats(hall: Pick<Hall, 'rows' | 'seatsPerRow'>): Seat[] {
     const seats: Seat[] = [];
     for (let row = 1; row <= hall.rows; row++) {
-      for (let seat = 1; seat <= hall.seatsPerRow; seat++) {
+      for (let seat = 1; seat <= hall.seatsPerRow; seat++)
         seats.push({ row, seat });
-      }
     }
     return seats;
   }
 
-  /** True when (row, seat) exists in the hall. */
-  hasSeat(hall: Hall, seat: Seat): boolean {
+  hasSeat(hall: Pick<Hall, 'rows' | 'seatsPerRow'>, seat: Seat): boolean {
     return (
       seat.row >= 1 &&
       seat.row <= hall.rows &&
@@ -81,15 +68,22 @@ export class HallsService {
     );
   }
 
-  remove(id: string): void {
-    this.findOne(id);
-    if (this.showingsStore.hasShowingsForHall(id)) {
-      this.logger.warn(`Зал ${id} не видалено: у ньому є сеанси`);
+  async remove(id: string): Promise<void> {
+    await this.findOne(id);
+    if (await this.showings.countBy({ hallId: id })) {
       throw new ConflictException(
         `Зал з id ${id} не можна видалити: у ньому є сеанси`,
       );
     }
-    this.halls = this.halls.filter((hall) => hall.id !== id);
-    this.logger.log(`Видалено зал ${id}`);
+    try {
+      await this.halls.delete(id);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23503') {
+        throw new ConflictException(
+          `Зал з id ${id} не можна видалити: у ньому є сеанси`,
+        );
+      }
+      throw error;
+    }
   }
 }

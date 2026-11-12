@@ -38,7 +38,7 @@ export class BookingsController {
   @Get('bookings')
   @ApiOperation({ summary: 'Усі бронювання' })
   @ApiOkResponse({ type: [Booking] })
-  findAll(): Booking[] {
+  findAll(): Promise<Booking[]> {
     return this.bookingsService.findAll();
   }
 
@@ -55,7 +55,7 @@ export class BookingsController {
     type: ErrorResponseDto,
     description: 'Сеанс не знайдено',
   })
-  getSeats(@Param('id', parseUuidPipe) id: string): SeatStatus[] {
+  getSeats(@Param('id', parseUuidPipe) id: string): Promise<SeatStatus[]> {
     return this.bookingsService.getSeatMap(id);
   }
 
@@ -80,7 +80,7 @@ export class BookingsController {
   create(
     @Param('id', parseUuidPipe) id: string,
     @Body() createBookingDto: CreateBookingDto,
-  ): Booking {
+  ): Promise<Booking> {
     return this.bookingsService.create(id, createBookingDto);
   }
 
@@ -96,7 +96,7 @@ export class BookingsController {
     type: ErrorResponseDto,
     description: 'Сеанс не знайдено',
   })
-  findByShowing(@Param('id', parseUuidPipe) id: string): Booking[] {
+  findByShowing(@Param('id', parseUuidPipe) id: string): Promise<Booking[]> {
     return this.bookingsService.findByShowing(id);
   }
 
@@ -113,7 +113,7 @@ export class BookingsController {
     type: ErrorResponseDto,
     description: 'Бронювання не знайдено',
   })
-  remove(@Param('id', parseUuidPipe) id: string): void {
-    this.bookingsService.remove(id);
+  remove(@Param('id', parseUuidPipe) id: string): Promise<void> {
+    return this.bookingsService.remove(id);
   }
 }

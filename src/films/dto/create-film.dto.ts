@@ -34,9 +34,13 @@ export class CreateFilmDto {
     example: 97,
     description: 'Тривалість у хвилинах (ціле додатне число)',
     minimum: 1,
+    maximum: 2_147_483_647,
   })
   @IsInt({ message: '$property має бути цілим числом' })
   @IsPositive({ message: '$property має бути додатним числом' })
+  @Max(2_147_483_647, {
+    message: '$property перевищує допустиме значення integer',
+  })
   durationMinutes!: number;
 
   @ApiProperty({

@@ -39,14 +39,14 @@ export class FilmsController {
     type: ErrorResponseDto,
     description: 'Поле відсутнє, має неправильний тип або зайве',
   })
-  create(@Body() createFilmDto: CreateFilmDto): Film {
+  create(@Body() createFilmDto: CreateFilmDto): Promise<Film> {
     return this.filmsService.create(createFilmDto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Список фільмів' })
   @ApiOkResponse({ type: [Film] })
-  findAll(): Film[] {
+  findAll(): Promise<Film[]> {
     return this.filmsService.findAll();
   }
 
@@ -62,7 +62,7 @@ export class FilmsController {
     type: ErrorResponseDto,
     description: 'Фільм не знайдено',
   })
-  findOne(@Param('id', parseUuidPipe) id: string): Film {
+  findOne(@Param('id', parseUuidPipe) id: string): Promise<Film> {
     return this.filmsService.findOne(id);
   }
 
@@ -81,7 +81,7 @@ export class FilmsController {
   update(
     @Param('id', parseUuidPipe) id: string,
     @Body() updateFilmDto: UpdateFilmDto,
-  ): Film {
+  ): Promise<Film> {
     return this.filmsService.update(id, updateFilmDto);
   }
 
@@ -102,7 +102,7 @@ export class FilmsController {
     type: ErrorResponseDto,
     description: 'На фільм посилається хоча б один сеанс',
   })
-  remove(@Param('id', parseUuidPipe) id: string): void {
-    this.filmsService.remove(id);
+  remove(@Param('id', parseUuidPipe) id: string): Promise<void> {
+    return this.filmsService.remove(id);
   }
 }

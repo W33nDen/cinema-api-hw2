@@ -8,42 +8,41 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
-/**
- * Unified error format for every HTTP error:
- * { statusCode, timestamp, path, message, error }.
- * `message` is a string, or an array of strings for validation errors.
- */
-@Catch(HttpException)
-export class HttpExceptionFilter implements ExceptionFilter {
+/** One response shape for validation, business errors and unexpected failures. */
+@Catch()
+export class HttpExceptionFilter implements ExceptionFilter<unknown> {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
-  catch(exception: HttpException, host: ArgumentsHost) {
+  catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const status = exception.getStatus();
-    const exceptionResponse = exception.getResponse();
-
-    const message =
-      typeof exceptionResponse === 'string'
+    const isHttpException = exception instanceof HttpException;
+    const status = isHttpException
+      ? exception.getStatus()
+      : HttpStatus.INTERNAL_SERVER_ERROR;
+    const exceptionResponse = isHttpException ? exception.getResponse() : null;
+    const payload =
+      typeof exceptionResponse === 'object' && exceptionResponse !== null
+        ? (exceptionResponse as { message?: string | string[]; error?: string })
+        : null;
+    const message = isHttpException
+      ? typeof exceptionResponse === 'string'
         ? exceptionResponse
-        : ((exceptionResponse as { message?: string | string[] }).message ??
-          exception.message);
-    const error =
-      typeof exceptionResponse === 'object' &&
-      (exceptionResponse as { error?: string }).error
-        ? (exceptionResponse as { error: string }).error
-        : exception.name;
+        : (payload?.message ?? exception.message)
+      : 'Внутрішня помилка сервера';
+    const error = isHttpException
+      ? (payload?.error ?? exception.name)
+      : 'Internal Server Error';
 
     if (status >= Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
       this.logger.error(
         `${request.method} ${request.url} -> ${status}`,
-        exception.stack,
+        exception instanceof Error ? exception.stack : undefined,
       );
     } else {
       this.logger.warn(`${request.method} ${request.url} -> ${status}`);
     }
-
     response.status(status).json({
       statusCode: status,
       timestamp: new Date().toISOString(),

@@ -26,9 +26,9 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('Cinema API')
     .setDescription(
-      'Розклад сеансів і бронювання місць у кінотеатрі (дані зберігаються в пам’яті)',
+      'Розклад сеансів із пагінацією та транзакційне бронювання місць (PostgreSQL + TypeORM)',
     )
-    .setVersion('1.0')
+    .setVersion('2.0')
     .build();
 
   const documentFactory = () => SwaggerModule.createDocument(app, config);

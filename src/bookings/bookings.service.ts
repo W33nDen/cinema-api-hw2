@@ -2,111 +2,158 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { HallsService } from '../halls/halls.service';
 import { Seat } from '../halls/entities/seat.entity';
-import { ShowingsService } from '../showings/showings.service';
+import { ShowingEntity } from '../showings/entities/showing-record.entity';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { Booking, SeatStatus } from './entities/booking.entity';
+import { BookingEntity } from './entities/booking-record.entity';
+import { BookingSeatEntity } from './entities/booking-seat.entity';
 
 const seatKey = (seat: Seat) => `${seat.row}:${seat.seat}`;
 const seatLabel = (seat: Seat) => `ряд ${seat.row}, місце ${seat.seat}`;
+const MAX_INT = 2_147_483_647;
 
 @Injectable()
 export class BookingsService {
-  private readonly logger = new Logger(BookingsService.name);
-  private bookings: Booking[] = [];
-
   constructor(
-    private readonly showingsService: ShowingsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly hallsService: HallsService,
+    @InjectRepository(BookingEntity)
+    private readonly bookings: Repository<BookingEntity>,
+    @InjectRepository(BookingSeatEntity)
+    private readonly bookingSeats: Repository<BookingSeatEntity>,
+    @InjectRepository(ShowingEntity)
+    private readonly showings: Repository<ShowingEntity>,
   ) {}
 
-  findAll(): Booking[] {
-    return this.bookings;
+  async findAll(): Promise<Booking[]> {
+    const rows = await this.bookings.find({
+      relations: { seats: true },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+    return rows.map((row) => this.toView(row));
   }
 
-  findByShowing(showingId: string): Booking[] {
-    this.showingsService.findOne(showingId);
-    return this.bookings.filter((booking) => booking.showingId === showingId);
+  async findByShowing(showingId: string): Promise<Booking[]> {
+    await this.requireShowing(showingId);
+    const rows = await this.bookings.find({
+      where: { showingId },
+      relations: { seats: true },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+    return rows.map((row) => this.toView(row));
   }
 
-  /**
-   * Books all requested seats or none of them. All checks run before the
-   * single push, and the method is synchronous, so no other request can
-   * interleave: a 400/409 never leaves a partial booking behind.
-   */
-  create(showingId: string, createBookingDto: CreateBookingDto): Booking {
-    const showing = this.showingsService.findOne(showingId);
-    const hall = this.hallsService.findOne(showing.hallId);
-    const seats: Seat[] = createBookingDto.seats.map(({ row, seat }) => ({
-      row,
-      seat,
-    }));
-
-    const outside = seats.filter(
-      (seat) => !this.hallsService.hasSeat(hall, seat),
-    );
-    if (outside.length > 0) {
-      this.logger.warn(`Бронювання на сеанс ${showingId}: місць немає в залі`);
-      throw new BadRequestException(
-        `Місць немає в залі "${hall.name}" (${hall.rows} рядів × ${hall.seatsPerRow} місць): ${outside.map(seatLabel).join('; ')}`,
-      );
+  async create(showingId: string, dto: CreateBookingDto): Promise<Booking> {
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        // Never use injected repositories inside a transaction: they can use
+        // another pooled connection and their writes would not be rolled back.
+        const showingRepo = manager.getRepository(ShowingEntity);
+        const bookingRepo = manager.getRepository(BookingEntity);
+        const seatRepo = manager.getRepository(BookingSeatEntity);
+        const showing = await showingRepo.findOne({
+          where: { id: showingId },
+          relations: { hall: true },
+        });
+        if (!showing) {
+          throw new NotFoundException(`Сеанс з id ${showingId} не знайдено`);
+        }
+        const hall = showing.hall;
+        const seats: Seat[] = dto.seats.map(({ row, seat }) => ({ row, seat }));
+        const outside = seats.filter(
+          (seat) => !this.hallsService.hasSeat(hall, seat),
+        );
+        if (outside.length) {
+          throw new BadRequestException(
+            `Місць немає в залі "${hall.name}" (${hall.rows} рядів × ${hall.seatsPerRow} місць): ${outside.map(seatLabel).join('; ')}`,
+          );
+        }
+        const totalPrice = showing.price * seats.length;
+        if (!Number.isSafeInteger(totalPrice) || totalPrice > MAX_INT) {
+          throw new BadRequestException(
+            'Загальна сума бронювання перевищує допустиме значення',
+          );
+        }
+        const booking = await bookingRepo.save(
+          bookingRepo.create({ showingId, totalPrice }),
+        );
+        const seatRows = seats.map((seat) =>
+          seatRepo.create({
+            bookingId: booking.id,
+            showingId,
+            row: seat.row,
+            seat: seat.seat,
+          }),
+        );
+        // The unique index arbitrates simultaneous requests; no check-then-write race.
+        await seatRepo.insert(seatRows);
+        booking.seats = seatRows;
+        return this.toView(booking);
+      });
+    } catch (error) {
+      // Reaching here means TypeORM has already rolled the whole transaction back.
+      if (error instanceof QueryFailedError) {
+        const driverError = error.driverError as {
+          code?: string;
+          constraint?: string;
+        };
+        if (
+          driverError.code === '23505' &&
+          driverError.constraint === 'uq_booking_seats_showing_row_seat'
+        ) {
+          throw new ConflictException('Одне або кілька місць уже заброньовані');
+        }
+      }
+      throw error;
     }
+  }
 
-    const booked = this.getBookedSeatKeys(showingId);
-    const taken = seats.filter((seat) => booked.has(seatKey(seat)));
-    if (taken.length > 0) {
-      this.logger.warn(`Бронювання на сеанс ${showingId}: місця вже зайняті`);
-      throw new ConflictException(
-        `Місця вже заброньовані: ${taken.map(seatLabel).join('; ')}`,
-      );
+  async getSeatMap(showingId: string): Promise<SeatStatus[]> {
+    const showing = await this.showings.findOne({
+      where: { id: showingId },
+      relations: { hall: true },
+    });
+    if (!showing) {
+      throw new NotFoundException(`Сеанс з id ${showingId} не знайдено`);
     }
-
-    const booking: Booking = {
-      id: randomUUID(),
-      showingId,
-      seats,
-      totalPrice: showing.price * seats.length,
-      createdAt: new Date().toISOString(),
-    };
-    this.bookings.push(booking);
-    this.logger.log(
-      `Створено бронювання ${booking.id} (${seats.length} місць)`,
+    const booked = new Set(
+      (await this.bookingSeats.findBy({ showingId })).map(seatKey),
     );
-    return booking;
+    return this.hallsService
+      .getSeats(showing.hall)
+      .map((seat) => ({ ...seat, isBooked: booked.has(seatKey(seat)) }));
   }
 
-  /** Every seat of the showing's hall with its booking state. */
-  getSeatMap(showingId: string): SeatStatus[] {
-    const showing = this.showingsService.findOne(showingId);
-    const hall = this.hallsService.findOne(showing.hallId);
-    const booked = this.getBookedSeatKeys(showingId);
-    return this.hallsService.getSeats(hall).map((seat) => ({
-      ...seat,
-      isBooked: booked.has(seatKey(seat)),
-    }));
-  }
-
-  /** Cancels a booking; its seats become free again. */
-  remove(id: string): void {
-    const exists = this.bookings.some((booking) => booking.id === id);
-    if (!exists) {
-      this.logger.warn(`Бронювання з id ${id} не знайдено`);
+  async remove(id: string): Promise<void> {
+    const { affected } = await this.bookings.delete(id);
+    if (!affected) {
       throw new NotFoundException(`Бронювання з id ${id} не знайдено`);
     }
-    this.bookings = this.bookings.filter((booking) => booking.id !== id);
-    this.logger.log(`Скасовано бронювання ${id}`);
+    // PostgreSQL ON DELETE CASCADE removes the seats, not a service-side loop.
   }
 
-  private getBookedSeatKeys(showingId: string): Set<string> {
-    return new Set(
-      this.bookings
-        .filter((booking) => booking.showingId === showingId)
-        .flatMap((booking) => booking.seats.map(seatKey)),
-    );
+  private async requireShowing(id: string): Promise<ShowingEntity> {
+    const showing = await this.showings.findOneBy({ id });
+    if (!showing) throw new NotFoundException(`Сеанс з id ${id} не знайдено`);
+    return showing;
+  }
+
+  private toView(row: BookingEntity): Booking {
+    return {
+      id: row.id,
+      showingId: row.showingId,
+      seats: (row.seats ?? []).map((seat) => ({
+        row: seat.row,
+        seat: seat.seat,
+      })),
+      totalPrice: row.totalPrice,
+      createdAt: row.createdAt.toISOString(),
+    };
   }
 }

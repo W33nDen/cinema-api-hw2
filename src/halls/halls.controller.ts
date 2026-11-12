@@ -42,14 +42,14 @@ export class HallsController {
     type: ErrorResponseDto,
     description: 'Зал з такою назвою вже існує',
   })
-  create(@Body() createHallDto: CreateHallDto): Hall {
+  create(@Body() createHallDto: CreateHallDto): Promise<Hall> {
     return this.hallsService.create(createHallDto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Список залів' })
   @ApiOkResponse({ type: [Hall] })
-  findAll(): Hall[] {
+  findAll(): Promise<Hall[]> {
     return this.hallsService.findAll();
   }
 
@@ -65,7 +65,7 @@ export class HallsController {
     type: ErrorResponseDto,
     description: 'Зал не знайдено',
   })
-  findOne(@Param('id', parseUuidPipe) id: string): HallWithSeats {
+  findOne(@Param('id', parseUuidPipe) id: string): Promise<HallWithSeats> {
     return this.hallsService.findOneWithSeats(id);
   }
 
@@ -86,7 +86,7 @@ export class HallsController {
     type: ErrorResponseDto,
     description: 'На зал посилається хоча б один сеанс',
   })
-  remove(@Param('id', parseUuidPipe) id: string): void {
-    this.hallsService.remove(id);
+  remove(@Param('id', parseUuidPipe) id: string): Promise<void> {
+    return this.hallsService.remove(id);
   }
 }

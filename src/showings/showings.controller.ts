@@ -13,6 +13,7 @@ import { ErrorResponseDto } from '../common/dto/error-response.dto';
 import { CreateShowingDto } from './dto/create-showing.dto';
 import { FindShowingsQueryDto } from './dto/find-showings-query.dto';
 import { ShowingView } from './entities/showing.entity';
+import { ShowingsPage } from './entities/showings-page.entity';
 import { ShowingsService } from './showings.service';
 
 @ApiTags('showings')
@@ -28,7 +29,7 @@ export class ShowingsController {
     description:
       'Фільм або зал з таким id не існує; startsAt не ISO 8601 або в минулому; price не ціле додатне число; поле відсутнє або зайве',
   })
-  create(@Body() createShowingDto: CreateShowingDto): ShowingView {
+  create(@Body() createShowingDto: CreateShowingDto): Promise<ShowingView> {
     return this.showingsService.create(createShowingDto);
   }
 
@@ -38,12 +39,12 @@ export class ShowingsController {
     description:
       'Фільтри filmId і date (YYYY-MM-DD, день за UTC) поєднуються через AND. Сортування за startsAt, при рівності — за id.',
   })
-  @ApiOkResponse({ type: [ShowingView] })
+  @ApiOkResponse({ type: ShowingsPage })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description: 'date не у форматі YYYY-MM-DD або filmId не UUID',
   })
-  findAll(@Query() query: FindShowingsQueryDto): ShowingView[] {
+  findAll(@Query() query: FindShowingsQueryDto): Promise<ShowingsPage> {
     return this.showingsService.findAll(query);
   }
 
@@ -59,7 +60,7 @@ export class ShowingsController {
     type: ErrorResponseDto,
     description: 'Сеанс не знайдено',
   })
-  findOne(@Param('id', parseUuidPipe) id: string): ShowingView {
+  findOne(@Param('id', parseUuidPipe) id: string): Promise<ShowingView> {
     return this.showingsService.findOneView(id);
   }
 }
